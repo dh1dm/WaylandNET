@@ -2,8 +2,9 @@ using WaylandNET.Client;
 
 using var conn = new WaylandClientConnection();
 var registry = conn.Display.GetRegistry();
-registry.Global += (_, name, @interface, version) =>
+registry.Global += (_, name, iface, version) =>
 {
-    Console.WriteLine($"Global {name}: {@interface} version {version}");
+    Console.WriteLine($"Global {name}: {iface} version {version}");
 };
-conn.Roundtrip();
+conn.Display.Sync().Done += (callback, data) => conn.Quit();
+conn.MessageLoop();

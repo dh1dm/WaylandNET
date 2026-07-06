@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <PackageId>WaylandNET</PackageId>
     <Authors>Tadeo Kondrak</Authors>
     <Version>0.2.0</Version>
@@ -10,5 +10,6 @@
     <RepositoryUrl>https://github.com/tadeokondrak/WaylandNET.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>wayland</PackageTags>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 </Project>

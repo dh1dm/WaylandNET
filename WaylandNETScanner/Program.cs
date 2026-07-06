@@ -82,7 +82,7 @@ namespace WaylandNETScanner
                 case "array":
                     return "byte[]";
                 case "fd":
-                    return "IntPtr";
+                    return "SafeFileHandle";
                 default:
                     throw new ArgumentException($"unknown wayland type {argument.Type}");
             }
@@ -285,7 +285,6 @@ namespace WaylandNETScanner
                                 foreach (var argument in @event.Arguments)
                                     gen.AppendLine($"{TypeEnumForArgument(argument)},");
                             }
-                            gen.AppendLine("break;");
                         }
                     }
                     using (gen.Case($"default:"))
@@ -438,8 +437,8 @@ namespace WaylandNETScanner
         {
             interfaces = protocol.Interfaces.ToDictionary(it => it.Name, it => it);
             GenerateCopyrightComment(gen, protocol.Copyright);
-            gen.AppendLine("#pragma warning disable 0162");
             gen.AppendLine("using System;");
+            gen.AppendLine("using Microsoft.Win32.SafeHandles;");
             gen.AppendLine("using WaylandNET;");
             gen.AppendLine("using WaylandNET.Client;");
             GenerateDescriptionComment(gen, protocol.Description);

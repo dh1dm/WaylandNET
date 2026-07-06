@@ -22,8 +22,8 @@
 /// ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 /// CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 /// SOFTWARE.
-#pragma warning disable 0162
 using System;
+using Microsoft.Win32.SafeHandles;
 using WaylandNET;
 using WaylandNET.Client;
 namespace WaylandNET.Client.Protocol
@@ -114,13 +114,11 @@ namespace WaylandNET.Client.Protocol
                         WaylandType.UInt,
                         WaylandType.String,
                     };
-                    break;
                 case EventOpcode.DeleteId:
                     return new WaylandType[]
                     {
                         WaylandType.UInt,
                     };
-                    break;
                 default:
                     throw new ArgumentOutOfRangeException("unknown event");
             }
@@ -152,7 +150,7 @@ namespace WaylandNET.Client.Protocol
         /// compositor after the callback is fired and as such the client must not
         /// attempt to use it after that point.
         /// 
-        /// The callback_data passed in the callback is the event serial.
+        /// The callback_data passed in the callback is undefined and should be ignored.
         /// </para>
         /// </summary>
         /// <returns>callback object for the sync request</returns>
@@ -292,13 +290,11 @@ namespace WaylandNET.Client.Protocol
                         WaylandType.String,
                         WaylandType.UInt,
                     };
-                    break;
                 case EventOpcode.GlobalRemove:
                     return new WaylandType[]
                     {
                         WaylandType.UInt,
                     };
-                    break;
                 default:
                     throw new ArgumentOutOfRangeException("unknown event");
             }
@@ -311,7 +307,7 @@ namespace WaylandNET.Client.Protocol
         /// </para>
         /// </summary>
         /// <param name="name">unique numeric name of the object</param>
-        /// <returns>bounded object</returns>
+        /// <returns>bound object</returns>
         public T Bind<T>(uint name, string @interface, uint version) where T : WaylandClientObject
         {
             uint id = Connection.AllocateId();
@@ -376,7 +372,6 @@ namespace WaylandNET.Client.Protocol
                     {
                         WaylandType.UInt,
                     };
-                    break;
                 default:
                     throw new ArgumentOutOfRangeException("unknown event");
             }

@@ -10,7 +10,7 @@ namespace WaylandNET.Client
     {
         public WlDisplay Display { get; private set; }
 
-        static WaylandWireConnection ConnectToDisplay(string display = null)
+        private static Socket ConnectToDisplay(string display = null)
         {
             display ??= Environment.GetEnvironmentVariable("WAYLAND_DISPLAY");
             display ??= "wayland-0";
@@ -24,42 +24,33 @@ namespace WaylandNET.Client
             {
                 string xdgRuntimeDir = Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR");
                 if (xdgRuntimeDir == null)
+                {
                     throw new Exception("XDG_RUNTIME_DIR missing from environment");
+                }
                 path = Path.Join(xdgRuntimeDir, display);
             }
 
             Socket socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
             EndPoint endpoint = new UnixDomainSocketEndPoint(path);
             socket.Connect(endpoint);
-            return new WaylandWireConnection(socket);
+            return socket;
         }
 
         public WaylandClientConnection(string display = null)
             : base(ConnectToDisplay(display), new WaylandClientObjectMap())
         {
-            uint id = ObjectMap.AllocateId();
+            uint id = AllocateId();
             Display = new WlDisplay(id, 1, this);
             Display.Error += (display, objectId, code, message) =>
-            {
                 throw new WaylandProtocolException(objectId, code, message);
-            };
-            Display.DeleteId += (display, id) =>
-            {
-                this.DeallocateId(id);
-            };
-            ObjectMap[id] = Display;
+            Display.DeleteId += (display, id) => DeallocateId(id);
+            base[id] = Display;
         }
 
-        public void Roundtrip()
-        {
-            var callback = Display.Sync();
-            var isDone = false;
-            callback.Done += (callback, data) =>
-            {
-                isDone = true;
-            };
-            while (!isDone)
-                Read();
-        }
+        public IClientTimer CreateTimer() => timerList.CreateTimer();
+
+        protected override int GetIdleTimeout() => timerList.GetTimeout();
+
+        private readonly ClientTimerList timerList = new ClientTimerList();
     }
 }

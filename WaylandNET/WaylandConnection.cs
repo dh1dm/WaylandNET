@@ -1,70 +1,31 @@
 using System;
+using System.IO;
 using System.Text;
-using System.Collections.Generic;
+using System.Net.Sockets;
+using System.Runtime.InteropServices;
 
 namespace WaylandNET
 {
     public abstract class WaylandConnection : IDisposable
     {
+        public WaylandConnection(Socket socket, WaylandObjectMap objectMap)
+        {
+            this.socket = socket;
+            this.objectMap = objectMap;
+        }
+
+        public void Dispose() => socket.Dispose();
+
         public WaylandObject this[uint id]
         {
-            get => ObjectMap[id];
-            set => ObjectMap[id] = value;
+            get => objectMap[id];
+            set => objectMap[id] = value;
         }
 
-        public uint AllocateId()
-        {
-            return ObjectMap.AllocateId();
-        }
+        public uint AllocateId() => objectMap.AllocateId();
+        public void DeallocateId(uint id) => objectMap.DeallocateId(id);
 
-        public void DeallocateId(uint id)
-        {
-            ObjectMap.DeallocateId(id);
-        }
-
-        public void Read()
-        {
-            WaylandMessageHeader message = WireConnection.ReadMessageHeader();
-            WaylandObject @object = ObjectMap[message.id];
-            WaylandType[] argumentTypes = @object.Arguments(message.opcode);
-            List<object> arguments = new List<object>();
-            foreach (WaylandType type in argumentTypes)
-            {
-                switch (type)
-                {
-                    case WaylandType.Int:
-                        arguments.Add(WireConnection.ReadInt32());
-                        break;
-                    case WaylandType.UInt:
-                        arguments.Add(WireConnection.ReadUInt32());
-                        break;
-                    case WaylandType.Fixed:
-                        arguments.Add(WireConnection.ReadDouble());
-                        break;
-                    case WaylandType.Object:
-                        arguments.Add(WireConnection.ReadUInt32());
-                        break;
-                    case WaylandType.NewId:
-                        arguments.Add(WireConnection.ReadUInt32());
-                        break;
-                    case WaylandType.String:
-                        arguments.Add(WireConnection.ReadString());
-                        break;
-                    case WaylandType.Array:
-                        arguments.Add(WireConnection.ReadBytes());
-                        break;
-                    case WaylandType.Handle:
-                        arguments.Add(WireConnection.ReadHandle());
-                        break;
-                }
-            }
-            if (@object.IsAlive)
-            {
-                @object.Handle(message.opcode, arguments.ToArray());
-            }
-        }
-
-        public void Marshal(uint id, ushort opcode, params object[] arguments)
+        public void SendRequest(uint id, ushort opcode, params object[] arguments)
         {
             ushort size = 8;
             foreach (object argument in arguments)
@@ -79,57 +40,163 @@ namespace WaylandNET
                     case string s:
                         size += 4;
                         if (s != null)
-                            size += (ushort)((Encoding.UTF8.GetByteCount(s) + 4) / 4 * 4);
+                            size += (ushort)((Encoding.UTF8.GetByteCount(s) + 4) & ~3);
                         break;
                     case byte[] a:
                         size += 4;
                         if (a != null)
-                            size += (ushort)((a.Length + 3) / 4 * 4);
+                            size += (ushort)((a.Length + 3) & ~3);
                         break;
-                    case IntPtr h:
+                    case SafeHandle h:
                         break;
                 }
             }
-            WireConnection.Write(id);
-            WireConnection.Write(((uint)size << 16) | (uint)opcode);
+            sendQueue.Write(id);
+            sendQueue.Write(opcode | (size << 16));
             foreach (object argument in arguments)
             {
                 switch (argument)
                 {
                     case int i:
-                        WireConnection.Write(i);
+                        sendQueue.Write(i);
                         break;
                     case uint u:
-                        WireConnection.Write(u);
+                        sendQueue.Write(u);
                         break;
                     case double d:
-                        WireConnection.Write(d);
+                        sendQueue.Write((int)(d * 256.0));
                         break;
                     case string s:
-                        WireConnection.Write(s);
+                        sendQueue.Write(s);
                         break;
                     case byte[] a:
-                        WireConnection.Write(a);
+                        sendQueue.Write(a);
                         break;
-                    case IntPtr h:
-                        WireConnection.Write(h);
+                    case SafeHandle h:
+                        sendQueue.Write(h);
                         break;
                 }
             }
         }
 
-        protected WaylandWireConnection WireConnection { get; private set; }
-        protected WaylandObjectMap ObjectMap { get; private set; }
-
-        protected WaylandConnection(WaylandWireConnection wireConnection, WaylandObjectMap objectMap)
+        public void MessageLoop()
         {
-            WireConnection = wireConnection;
-            ObjectMap = objectMap;
+            SafeHandle sockfd = socket.SafeHandle;
+            SysNative.Result result;
+            SysNative.PollFd pfd;
+            quit = false;
+            while (true)
+            {
+                int timeout = quit ? 0 : GetIdleTimeout();
+                pfd.events = sendQueue.Flush(sockfd) ? PollEvents.POLLIN :
+                    PollEvents.POLLIN | PollEvents.POLLOUT;
+                pfd.revents = 0;
+                bool ignored = false;
+                sockfd.DangerousAddRef(ref ignored); // throws if disposed
+                pfd.fd = (int)sockfd.DangerousGetHandle();
+                try
+                {
+                    result = SysNative.Poll(ref pfd, timeout);
+                }
+                finally
+                {
+                    sockfd.DangerousRelease();
+                }
+                if (result.retval < 0)
+                {
+                    throw new IOException(Marshal.GetPInvokeErrorMessage(result.errno));
+                }
+                if (result.retval == 0) // timeout
+                {
+                    if (quit)
+                    {
+                        break;
+                    }
+                    continue;
+                }
+                if ((pfd.revents & (PollEvents.POLLERR | PollEvents.POLLHUP | PollEvents.POLLNVAL)) != 0)
+                {
+                    throw new SocketException((int)SocketError.NotConnected);
+                }
+                if ((pfd.revents & PollEvents.POLLIN) != 0)
+                {
+                    recvQueue.Receive(sockfd);
+                    ParseReceived();
+                }
+            }
         }
 
-        public void Dispose()
+        public void Quit() => quit = true;
+
+        protected virtual int GetIdleTimeout() => -1;
+
+        private void ParseReceived()
         {
-            WireConnection.Dispose();
+            while (true)
+            {
+                if (recvObject == null)
+                {
+                    if (recvQueue.Count < 8)
+                    {
+                        break;
+                    }
+                    recvObject = objectMap[recvQueue.ReadUInt32()];
+                    uint header = recvQueue.ReadUInt32();
+                    recvOpcode = (ushort)header;
+                    recvLength = (ushort)(header >> 16);
+                }
+                if (recvQueue.Count < (recvLength - 8))
+                {
+                    break;
+                }
+                WaylandType[] argumentTypes = recvObject.Arguments(recvOpcode);
+                object[] arguments = new object[argumentTypes.Length];
+                for (int i = 0; i < argumentTypes.Length; i++)
+                {
+                    switch (argumentTypes[i])
+                    {
+                        case WaylandType.Int:
+                            arguments[i] = recvQueue.ReadInt32();
+                            break;
+                        case WaylandType.UInt:
+                            arguments[i] = recvQueue.ReadUInt32();
+                            break;
+                        case WaylandType.Fixed:
+                            arguments[i] = recvQueue.ReadInt32() / 256.0d;
+                            break;
+                        case WaylandType.Object:
+                            arguments[i] = objectMap[recvQueue.ReadUInt32()];
+                            break;
+                        case WaylandType.NewId:
+                            arguments[i] = recvQueue.ReadUInt32();
+                            break;
+                        case WaylandType.String:
+                            arguments[i] = recvQueue.ReadString();
+                            break;
+                        case WaylandType.Array:
+                            arguments[i] = recvQueue.ReadBytes();
+                            break;
+                        case WaylandType.Handle:
+                            arguments[i] = recvQueue.ReadHandle();
+                            break;
+                    }
+                }
+                if (recvObject.IsAlive)
+                {
+                    recvObject.Handle(recvOpcode, arguments);
+                }
+                recvObject = null;
+            }
         }
+
+        private readonly Socket socket;
+        private readonly WaylandObjectMap objectMap;
+        private readonly SendQueue sendQueue = new SendQueue();
+        private readonly RecvQueue recvQueue = new RecvQueue();
+
+        private bool quit;
+        private ushort recvLength;
+        private ushort recvOpcode;
+        private WaylandObject recvObject;
     }
 }

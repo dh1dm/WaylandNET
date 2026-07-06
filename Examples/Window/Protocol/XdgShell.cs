@@ -23,13 +23,13 @@
 /// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 /// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 /// DEALINGS IN THE SOFTWARE.
-#pragma warning disable 0162
 using System;
+using Microsoft.Win32.SafeHandles;
 using WaylandNET;
 using WaylandNET.Client;
 namespace WaylandNET.Client.Protocol
 {
-    /// xdg_wm_base version 6
+    /// xdg_wm_base version 7
     /// <summary>
     /// create desktop-style surfaces
     /// <para>
@@ -100,7 +100,6 @@ namespace WaylandNET.Client.Protocol
                     {
                         WaylandType.UInt,
                     };
-                    break;
                 default:
                     throw new ArgumentOutOfRangeException("unknown event");
             }
@@ -148,16 +147,15 @@ namespace WaylandNET.Client.Protocol
         /// <summary>
         /// create a shell surface from a surface
         /// <para>
-        /// This creates an xdg_surface for the given surface. While xdg_surface
-        /// itself is not a role, the corresponding surface may only be assigned
-        /// a role extending xdg_surface, such as xdg_toplevel or xdg_popup. It is
-        /// illegal to create an xdg_surface for a wl_surface which already has an
-        /// assigned role and this will result in a role error.
-        /// 
         /// This creates an xdg_surface for the given surface. An xdg_surface is
         /// used as basis to define a role to a given surface, such as xdg_toplevel
         /// or xdg_popup. It also manages functionality shared between xdg_surface
         /// based surface roles.
+        /// 
+        /// While xdg_surface itself is not a role, the corresponding surface may
+        /// only be assigned a role extending xdg_surface, such as xdg_toplevel or
+        /// xdg_popup. It is illegal to create an xdg_surface for a wl_surface which
+        /// already has anassigned role and this will result in a role error.
         /// 
         /// See the documentation of xdg_surface for more details about what an
         /// xdg_surface is and how it is used.
@@ -184,7 +182,7 @@ namespace WaylandNET.Client.Protocol
             Marshal((ushort)RequestOpcode.Pong, serial);
         }
     }
-    /// xdg_positioner version 6
+    /// xdg_positioner version 7
     /// <summary>
     /// child surface positioner
     /// <para>
@@ -355,14 +353,14 @@ namespace WaylandNET.Client.Protocol
         /// set anchor rectangle anchor
         /// <para>
         /// Defines the anchor point for the anchor rectangle. The specified anchor
-        /// is used derive an anchor point that the child surface will be
+        /// is used to derive an anchor point that the child surface will be
         /// positioned relative to. If a corner anchor is set (e.g. 'top_left' or
         /// 'bottom_right'), the anchor point will be at the specified corner;
         /// otherwise, the derived anchor point will be centered on the specified
         /// edge, or in the center of the anchor rectangle if no edge is specified.
         /// </para>
         /// </summary>
-        /// <param name="anchor">anchor</param>
+        /// <param name="anchor">anchor point</param>
         public void SetAnchor(Anchor anchor)
         {
             Marshal((ushort)RequestOpcode.SetAnchor, (uint)anchor);
@@ -403,9 +401,9 @@ namespace WaylandNET.Client.Protocol
         /// </para>
         /// </summary>
         /// <param name="constraintAdjustment">bit mask of constraint adjustments</param>
-        public void SetConstraintAdjustment(uint constraintAdjustment)
+        public void SetConstraintAdjustment(ConstraintAdjustment constraintAdjustment)
         {
-            Marshal((ushort)RequestOpcode.SetConstraintAdjustment, constraintAdjustment);
+            Marshal((ushort)RequestOpcode.SetConstraintAdjustment, (uint)constraintAdjustment);
         }
         /// <summary>
         /// set surface position offset
@@ -445,7 +443,7 @@ namespace WaylandNET.Client.Protocol
             Marshal((ushort)RequestOpcode.SetReactive);
         }
         /// <summary>
-        /// 
+        /// set parent size
         /// <para>
         /// Set the parent window geometry the compositor should use when
         /// positioning the popup. The compositor may use this information to
@@ -477,7 +475,7 @@ namespace WaylandNET.Client.Protocol
             Marshal((ushort)RequestOpcode.SetParentConfigure, serial);
         }
     }
-    /// xdg_surface version 6
+    /// xdg_surface version 7
     /// <summary>
     /// desktop user interface surface base interface
     /// <para>
@@ -506,7 +504,8 @@ namespace WaylandNET.Client.Protocol
     /// manipulate a buffer prior to the first xdg_surface.configure call must
     /// also be treated as errors.
     /// 
-    /// After creating a role-specific object and setting it up, the client must
+    /// After creating a role-specific object and setting it up (e.g. by sending
+    /// the title, app ID, size constraints, parent, etc), the client must
     /// perform an initial commit without any buffer attached. The compositor
     /// will reply with initial wl_surface state such as
     /// wl_surface.preferred_buffer_scale followed by an xdg_surface.configure
@@ -594,7 +593,6 @@ namespace WaylandNET.Client.Protocol
                     {
                         WaylandType.UInt,
                     };
-                    break;
                 default:
                     throw new ArgumentOutOfRangeException("unknown event");
             }
@@ -651,6 +649,8 @@ namespace WaylandNET.Client.Protocol
         /// xdg_popup is and how it is used.
         /// </para>
         /// </summary>
+        /// <param name="parent">parent surface for this popup</param>
+        /// <param name="positioner">positioner for this popup</param>
         public XdgPopup GetPopup(XdgSurface parent, XdgPositioner positioner)
         {
             uint id = Connection.AllocateId();
@@ -664,10 +664,12 @@ namespace WaylandNET.Client.Protocol
         /// The window geometry of a surface is its "visible bounds" from the
         /// user's perspective. Client-side decorations often have invisible
         /// portions like drop-shadows which should be ignored for the
-        /// purposes of aligning, placing and constraining windows.
+        /// purposes of aligning, placing and constraining windows. Note that
+        /// in some situations, compositors may clip rendering to the window
+        /// geometry, so the client should avoid putting functional elements
+        /// outside of it.
         /// 
-        /// The window geometry is double buffered, and will be applied at the
-        /// time wl_surface.commit of the corresponding wl_surface is called.
+        /// The window geometry is double-buffered state, see wl_surface.commit.
         /// 
         /// When maintaining a position, the compositor should treat the (x, y)
         /// coordinate of the window geometry as the top left corner of the window.
@@ -701,6 +703,10 @@ namespace WaylandNET.Client.Protocol
         /// invalid_size error.
         /// </para>
         /// </summary>
+        /// <param name="x">x coordinate of the top-left corner of the window inside this surface</param>
+        /// <param name="y">y coordinate of the top-left corner of the window inside this surface</param>
+        /// <param name="width">width of the window</param>
+        /// <param name="height">height of the window</param>
         public void SetWindowGeometry(int x, int y, int width, int height)
         {
             Marshal((ushort)RequestOpcode.SetWindowGeometry, x, y, width, height);
@@ -748,7 +754,7 @@ namespace WaylandNET.Client.Protocol
             Marshal((ushort)RequestOpcode.AckConfigure, serial);
         }
     }
-    /// xdg_toplevel version 6
+    /// xdg_toplevel version 7
     /// <summary>
     /// toplevel surface
     /// <para>
@@ -758,7 +764,7 @@ namespace WaylandNET.Client.Protocol
     /// id, and well as trigger user interactive operations such as interactive
     /// resize and move.
     /// 
-    /// A xdg_toplevel by default is responsible for providing the full intended
+    /// An xdg_toplevel by default is responsible for providing the full intended
     /// visual representation of the toplevel, which depending on the window
     /// state, may mean things like a title bar, window controls and drop shadow.
     /// 
@@ -768,7 +774,7 @@ namespace WaylandNET.Client.Protocol
     /// attributes (e.g. title, state, stacking, ...) are discarded for
     /// an xdg_toplevel surface when it is unmapped. The xdg_toplevel returns to
     /// the state it had right after xdg_surface.get_toplevel. The client
-    /// can re-map the toplevel by perfoming a commit without any buffer
+    /// can re-map the toplevel by performing a commit without any buffer
     /// attached, waiting for a configure event and handling it as usual (see
     /// xdg_surface description).
     /// 
@@ -824,10 +830,16 @@ namespace WaylandNET.Client.Protocol
         /// arguments should be interpreted, and possibly how it should be
         /// drawn.
         /// 
+        /// The states are sent as an array of 32-bit unsigned integers in
+        /// native endianness. State values are defined in the state enum.
+        /// 
         /// Clients must send an ack_configure in response to this event. See
         /// xdg_surface.configure and xdg_surface.ack_configure for details.
         /// </para>
         /// </summary>
+        /// <param name="width">suggested width of window</param>
+        /// <param name="height">suggested height of window</param>
+        /// <param name="states">suggested states of the window</param>
         public delegate void ConfigureHandler(XdgToplevel xdgToplevel, int width, int height, byte[] states);
         /// <summary>
         /// surface wants to be closed
@@ -863,6 +875,8 @@ namespace WaylandNET.Client.Protocol
         /// xdg_toplevel.configure and xdg_surface.configure.
         /// </para>
         /// </summary>
+        /// <param name="width">suggested maximum width of surface</param>
+        /// <param name="height">suggested maximum height of surface</param>
         public delegate void ConfigureBoundsHandler(XdgToplevel xdgToplevel, int width, int height);
         /// <summary>
         /// compositor capabilities
@@ -886,7 +900,7 @@ namespace WaylandNET.Client.Protocol
         /// xdg_surface.configure for details.
         /// 
         /// The capabilities are sent as an array of 32-bit unsigned integers in
-        /// native endianness.
+        /// native endianness. Capability values are defined in the wm_capabilities enum.
         /// </para>
         /// </summary>
         /// <param name="capabilities">array of 32-bit capabilities</param>
@@ -940,25 +954,21 @@ namespace WaylandNET.Client.Protocol
                         WaylandType.Int,
                         WaylandType.Array,
                     };
-                    break;
                 case EventOpcode.Close:
                     return new WaylandType[]
                     {
                     };
-                    break;
                 case EventOpcode.ConfigureBounds:
                     return new WaylandType[]
                     {
                         WaylandType.Int,
                         WaylandType.Int,
                     };
-                    break;
                 case EventOpcode.WmCapabilities:
                     return new WaylandType[]
                     {
                         WaylandType.Array,
                     };
-                    break;
                 default:
                     throw new ArgumentOutOfRangeException("unknown event");
             }
@@ -996,8 +1006,7 @@ namespace WaylandNET.Client.Protocol
         /// configure event to ensure that both the client and the compositor
         /// setting the state can be synchronized.
         /// 
-        /// States set in this way are double-buffered. They will get applied on
-        /// the next commit.
+        /// States set in this way are double-buffered, see wl_surface.commit.
         /// </para>
         /// </summary>
         public enum State : int
@@ -1011,6 +1020,10 @@ namespace WaylandNET.Client.Protocol
             TiledTop = 7,
             TiledBottom = 8,
             Suspended = 9,
+            ConstrainedLeft = 10,
+            ConstrainedRight = 11,
+            ConstrainedTop = 12,
+            ConstrainedBottom = 13,
         }
         public enum WmCapabilitiesEnum : int
         {
@@ -1056,6 +1069,7 @@ namespace WaylandNET.Client.Protocol
         /// otherwise the invalid_parent protocol error is raised.
         /// </para>
         /// </summary>
+        /// <param name="parent">parent surface for this surface</param>
         public void SetParent(XdgToplevel parent)
         {
             Marshal((ushort)RequestOpcode.SetParent, parent.Id);
@@ -1072,6 +1086,7 @@ namespace WaylandNET.Client.Protocol
         /// The string must be encoded in UTF-8.
         /// </para>
         /// </summary>
+        /// <param name="title">title of the surface</param>
         public void SetTitle(string title)
         {
             Marshal((ushort)RequestOpcode.SetTitle, title);
@@ -1104,6 +1119,7 @@ namespace WaylandNET.Client.Protocol
         /// [0] https://standards.freedesktop.org/desktop-entry-spec/
         /// </para>
         /// </summary>
+        /// <param name="appId">application identifier surface belongs to</param>
         public void SetAppId(string appId)
         {
             Marshal((ushort)RequestOpcode.SetAppId, appId);
@@ -1214,8 +1230,7 @@ namespace WaylandNET.Client.Protocol
         /// The width and height arguments are in window geometry coordinates.
         /// See xdg_surface.set_window_geometry.
         /// 
-        /// Values set in this way are double-buffered. They will get applied
-        /// on the next commit.
+        /// Values set in this way are double-buffered, see wl_surface.commit.
         /// 
         /// The compositor can use this information to allow or disallow
         /// different states like maximize or fullscreen and draw accurate
@@ -1238,10 +1253,12 @@ namespace WaylandNET.Client.Protocol
         /// a surface is illegal and will result in an invalid_size error.
         /// 
         /// The width and height must be greater than or equal to zero. Using
-        /// strictly negative values for width or height will result in a
+        /// strictly negative values for width or height will result in an
         /// invalid_size error.
         /// </para>
         /// </summary>
+        /// <param name="width">maximum width of the window</param>
+        /// <param name="height">maximum height of the window</param>
         public void SetMaxSize(int width, int height)
         {
             Marshal((ushort)RequestOpcode.SetMaxSize, width, height);
@@ -1257,8 +1274,7 @@ namespace WaylandNET.Client.Protocol
         /// The width and height arguments are in window geometry coordinates.
         /// See xdg_surface.set_window_geometry.
         /// 
-        /// Values set in this way are double-buffered. They will get applied
-        /// on the next commit.
+        /// Values set in this way are double-buffered, see wl_surface.commit.
         /// 
         /// The compositor can use this information to allow or disallow
         /// different states like maximize or fullscreen and draw accurate
@@ -1281,10 +1297,12 @@ namespace WaylandNET.Client.Protocol
         /// a surface is illegal and will result in an invalid_size error.
         /// 
         /// The width and height must be greater than or equal to zero. Using
-        /// strictly negative values for width and height will result in a
+        /// strictly negative values for width and height will result in an
         /// invalid_size error.
         /// </para>
         /// </summary>
+        /// <param name="width">minimum width of the window</param>
+        /// <param name="height">minimum height of the window</param>
         public void SetMinSize(int width, int height)
         {
             Marshal((ushort)RequestOpcode.SetMinSize, width, height);
@@ -1365,7 +1383,7 @@ namespace WaylandNET.Client.Protocol
         /// 
         /// If the surface doesn't cover the whole output, the compositor will
         /// position the surface in the center of the output and compensate with
-        /// with border fill covering the rest of the output. The content of the
+        /// border fill covering the rest of the output. The content of the
         /// border fill is undefined, but should be assumed to be in some way that
         /// attempts to blend into the surrounding area (e.g. solid black).
         /// 
@@ -1375,6 +1393,7 @@ namespace WaylandNET.Client.Protocol
         /// visible below the fullscreened surface.
         /// </para>
         /// </summary>
+        /// <param name="output">preferred output to place surface on</param>
         public void SetFullscreen(WlOutput output)
         {
             Marshal((ushort)RequestOpcode.SetFullscreen, output.Id);
@@ -1423,7 +1442,7 @@ namespace WaylandNET.Client.Protocol
             Marshal((ushort)RequestOpcode.SetMinimized);
         }
     }
-    /// xdg_popup version 6
+    /// xdg_popup version 7
     /// <summary>
     /// short-lived, popup surfaces for menus
     /// <para>
@@ -1566,18 +1585,15 @@ namespace WaylandNET.Client.Protocol
                         WaylandType.Int,
                         WaylandType.Int,
                     };
-                    break;
                 case EventOpcode.PopupDone:
                     return new WaylandType[]
                     {
                     };
-                    break;
                 case EventOpcode.Repositioned:
                     return new WaylandType[]
                     {
                         WaylandType.UInt,
                     };
-                    break;
                 default:
                     throw new ArgumentOutOfRangeException("unknown event");
             }

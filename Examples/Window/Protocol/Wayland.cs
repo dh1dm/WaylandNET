@@ -22,13 +22,13 @@
 /// ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 /// CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 /// SOFTWARE.
-#pragma warning disable 0162
 using System;
+using Microsoft.Win32.SafeHandles;
 using WaylandNET;
 using WaylandNET.Client;
 namespace WaylandNET.Client.Protocol
 {
-    /// wl_compositor version 6
+    /// wl_compositor version 7
     /// <summary>
     /// the compositor singleton
     /// <para>
@@ -46,6 +46,7 @@ namespace WaylandNET.Client.Protocol
         {
             CreateSurface,
             CreateRegion,
+            Release,
         }
         public enum EventOpcode : ushort
         {
@@ -94,8 +95,19 @@ namespace WaylandNET.Client.Protocol
             Connection[id] = new WlRegion(id, Version, ClientConnection);
             return (WlRegion)Connection[id];
         }
+        /// <summary>
+        /// destroy wl_compositor
+        /// <para>
+        /// This request destroys the wl_compositor. This has no effect on any other objects.
+        /// </para>
+        /// </summary>
+        public void Release()
+        {
+            Marshal((ushort)RequestOpcode.Release);
+            Die();
+        }
     }
-    /// wl_shm_pool version 1
+    /// wl_shm_pool version 2
     /// <summary>
     /// a shared memory pool
     /// <para>
@@ -203,7 +215,7 @@ namespace WaylandNET.Client.Protocol
             Marshal((ushort)RequestOpcode.Resize, size);
         }
     }
-    /// wl_shm version 1
+    /// wl_shm version 2
     /// <summary>
     /// shared memory support
     /// <para>
@@ -226,6 +238,7 @@ namespace WaylandNET.Client.Protocol
         public enum RequestOpcode : ushort
         {
             CreatePool,
+            Release,
         }
         public enum EventOpcode : ushort
         {
@@ -237,6 +250,10 @@ namespace WaylandNET.Client.Protocol
         /// Informs the client about a valid pixel format that
         /// can be used for buffers. Known formats include
         /// argb8888 and xrgb8888.
+        /// 
+        /// Extensions to drm_fourcc.h (or the format enum) do not require
+        /// increasing the wl_shm version; as a result, clients may receive format
+        /// codes which were not in the list at the time the client was made.
         /// </para>
         /// </summary>
         /// <param name="format">buffer pixel format</param>
@@ -265,7 +282,6 @@ namespace WaylandNET.Client.Protocol
                     {
                         WaylandType.UInt,
                     };
-                    break;
                 default:
                     throw new ArgumentOutOfRangeException("unknown event");
             }
@@ -293,7 +309,8 @@ namespace WaylandNET.Client.Protocol
         /// 
         /// The drm format codes match the macros defined in drm_fourcc.h, except
         /// argb8888 and xrgb8888. The formats actually supported by the compositor
-        /// will be reported by the format event.
+        /// will be reported by the format event. See drm_fourcc.h for more detailed
+        /// format descriptions.
         /// 
         /// For all wl_shm formats and unless specified in another protocol
         /// extension, pre-multiplied alpha is used for pixel values.
@@ -409,6 +426,41 @@ namespace WaylandNET.Client.Protocol
             Xbgr16161616 = 942948952,
             Argb16161616 = 942953025,
             Abgr16161616 = 942948929,
+            C1 = 538980675,
+            C2 = 538980931,
+            C4 = 538981443,
+            D1 = 538980676,
+            D2 = 538980932,
+            D4 = 538981444,
+            D8 = 538982468,
+            R1 = 538980690,
+            R2 = 538980946,
+            R4 = 538981458,
+            R10 = 540029266,
+            R12 = 540160338,
+            Avuy8888 = 1498764865,
+            Xvuy8888 = 1498764888,
+            P030 = 808661072,
+            Rgb161616 = 942950226,
+            Bgr161616 = 942950210,
+            R16f = 1210064978,
+            Gr1616f = 1210077767,
+            Bgr161616f = 1213351746,
+            R32f = 1176510546,
+            Gr3232f = 1176523335,
+            Bgr323232f = 1179797314,
+            Abgr32323232f = 1178092097,
+            Nv20 = 808605262,
+            Nv30 = 808670798,
+            S010 = 808530003,
+            S210 = 808530515,
+            S410 = 808531027,
+            S012 = 842084435,
+            S212 = 842084947,
+            S412 = 842085459,
+            S016 = 909193299,
+            S216 = 909193811,
+            S416 = 909194323,
         }
         /// <summary>
         /// create a shm pool
@@ -423,12 +475,26 @@ namespace WaylandNET.Client.Protocol
         /// <returns>pool to create</returns>
         /// <param name="fd">file descriptor for the pool</param>
         /// <param name="size">pool size, in bytes</param>
-        public WlShmPool CreatePool(IntPtr fd, int size)
+        public WlShmPool CreatePool(SafeFileHandle fd, int size)
         {
             uint id = Connection.AllocateId();
             Marshal((ushort)RequestOpcode.CreatePool, id, fd, size);
             Connection[id] = new WlShmPool(id, Version, ClientConnection);
             return (WlShmPool)Connection[id];
+        }
+        /// <summary>
+        /// release the shm object
+        /// <para>
+        /// Using this request a client can tell the server that it is not going to
+        /// use the shm object anymore.
+        /// 
+        /// Objects created via this interface remain unaffected.
+        /// </para>
+        /// </summary>
+        public void Release()
+        {
+            Marshal((ushort)RequestOpcode.Release);
+            Die();
         }
     }
     /// wl_buffer version 1
@@ -442,9 +508,11 @@ namespace WaylandNET.Client.Protocol
     /// client provides and updates the contents is defined by the buffer factory
     /// interface.
     /// 
-    /// If the buffer uses a format that has an alpha channel, the alpha channel
-    /// is assumed to be premultiplied in the color channels unless otherwise
-    /// specified.
+    /// Color channels are assumed to be electrical rather than optical (in other
+    /// words, encoded with a transfer function) unless otherwise specified. If
+    /// the buffer uses a format that has an alpha channel, the alpha channel is
+    /// assumed to be premultiplied into the electrical color channel values
+    /// (after transfer function encoding) unless otherwise specified.
     /// 
     /// Note, because wl_buffer objects are created from multiple independent
     /// factory interfaces, the wl_buffer interface is frozen at version 1.
@@ -467,8 +535,10 @@ namespace WaylandNET.Client.Protocol
         /// compositor releases buffer
         /// <para>
         /// Sent when this wl_buffer is no longer used by the compositor.
-        /// The client is now free to reuse or destroy this buffer and its
-        /// backing storage.
+        /// 
+        /// For more information on when release events may or may not be sent,
+        /// and what consequences it has, please see the description of
+        /// wl_surface.attach.
         /// 
         /// If a client receives a release event before the frame callback
         /// requested in the same wl_surface.commit that attaches this
@@ -503,7 +573,6 @@ namespace WaylandNET.Client.Protocol
                     return new WaylandType[]
                     {
                     };
-                    break;
                 default:
                     throw new ArgumentOutOfRangeException("unknown event");
             }
@@ -523,7 +592,7 @@ namespace WaylandNET.Client.Protocol
             Die();
         }
     }
-    /// wl_data_offer version 3
+    /// wl_data_offer version 4
     /// <summary>
     /// offer to transfer data
     /// <para>
@@ -654,19 +723,16 @@ namespace WaylandNET.Client.Protocol
                     {
                         WaylandType.String,
                     };
-                    break;
                 case EventOpcode.SourceActions:
                     return new WaylandType[]
                     {
                         WaylandType.UInt,
                     };
-                    break;
                 case EventOpcode.Action:
                     return new WaylandType[]
                     {
                         WaylandType.UInt,
                     };
-                    break;
                 default:
                     throw new ArgumentOutOfRangeException("unknown event");
             }
@@ -725,7 +791,7 @@ namespace WaylandNET.Client.Protocol
         /// </summary>
         /// <param name="mimeType">mime type desired by receiver</param>
         /// <param name="fd">file descriptor for data transfer</param>
-        public void Receive(string mimeType, IntPtr fd)
+        public void Receive(string mimeType, SafeFileHandle fd)
         {
             Marshal((ushort)RequestOpcode.Receive, mimeType, fd);
         }
@@ -806,7 +872,7 @@ namespace WaylandNET.Client.Protocol
             Marshal((ushort)RequestOpcode.SetActions, (uint)dndActions, (uint)preferredAction);
         }
     }
-    /// wl_data_source version 3
+    /// wl_data_source version 4
     /// <summary>
     /// offer to transfer data
     /// <para>
@@ -857,7 +923,7 @@ namespace WaylandNET.Client.Protocol
         /// </summary>
         /// <param name="mimeType">mime type for the data</param>
         /// <param name="fd">file descriptor for the data</param>
-        public delegate void SendHandler(WlDataSource wlDataSource, string mimeType, IntPtr fd);
+        public delegate void SendHandler(WlDataSource wlDataSource, string mimeType, SafeFileHandle fd);
         /// <summary>
         /// selection was cancelled
         /// <para>
@@ -891,8 +957,8 @@ namespace WaylandNET.Client.Protocol
         /// acceptance, wl_data_source.cancelled may still be emitted afterwards
         /// if the drop destination does not accept any mime type.
         /// 
-        /// However, this event might however not be received if the compositor
-        /// cancelled the drag-and-drop operation before this event could happen.
+        /// However, this event might not be received if the compositor cancelled
+        /// the drag-and-drop operation before this event could happen.
         /// 
         /// Note that the data_source may still be used in the future and should
         /// not be destroyed here.
@@ -935,7 +1001,7 @@ namespace WaylandNET.Client.Protocol
         /// The most recent action received is always the valid one. The chosen
         /// action may change alongside negotiation (e.g. an "ask" action can turn
         /// into a "move" operation), so the effects of the final action must
-        /// always be applied in wl_data_offer.dnd_finished.
+        /// always be applied in wl_data_source.dnd_finished.
         /// 
         /// Clients can trigger cursor surface changes from this point, so
         /// they reflect the current action.
@@ -962,7 +1028,7 @@ namespace WaylandNET.Client.Protocol
                 case EventOpcode.Send:
                     {
                         var mimeType = (string)arguments[0];
-                        var fd = (IntPtr)arguments[1];
+                        var fd = (SafeFileHandle)arguments[1];
                         Send?.Invoke(this, mimeType, fd);
                         break;
                     }
@@ -1000,35 +1066,29 @@ namespace WaylandNET.Client.Protocol
                     {
                         WaylandType.String,
                     };
-                    break;
                 case EventOpcode.Send:
                     return new WaylandType[]
                     {
                         WaylandType.String,
                         WaylandType.Handle,
                     };
-                    break;
                 case EventOpcode.Cancelled:
                     return new WaylandType[]
                     {
                     };
-                    break;
                 case EventOpcode.DndDropPerformed:
                     return new WaylandType[]
                     {
                     };
-                    break;
                 case EventOpcode.DndFinished:
                     return new WaylandType[]
                     {
                     };
-                    break;
                 case EventOpcode.Action:
                     return new WaylandType[]
                     {
                         WaylandType.UInt,
                     };
-                    break;
                 default:
                     throw new ArgumentOutOfRangeException("unknown event");
             }
@@ -1086,7 +1146,7 @@ namespace WaylandNET.Client.Protocol
             Marshal((ushort)RequestOpcode.SetActions, (uint)dndActions);
         }
     }
-    /// wl_data_device version 3
+    /// wl_data_device version 4
     /// <summary>
     /// data transfer device
     /// <para>
@@ -1269,7 +1329,6 @@ namespace WaylandNET.Client.Protocol
                     {
                         WaylandType.NewId,
                     };
-                    break;
                 case EventOpcode.Enter:
                     return new WaylandType[]
                     {
@@ -1279,12 +1338,10 @@ namespace WaylandNET.Client.Protocol
                         WaylandType.Fixed,
                         WaylandType.Object,
                     };
-                    break;
                 case EventOpcode.Leave:
                     return new WaylandType[]
                     {
                     };
-                    break;
                 case EventOpcode.Motion:
                     return new WaylandType[]
                     {
@@ -1292,18 +1349,15 @@ namespace WaylandNET.Client.Protocol
                         WaylandType.Fixed,
                         WaylandType.Fixed,
                     };
-                    break;
                 case EventOpcode.Drop:
                     return new WaylandType[]
                     {
                     };
-                    break;
                 case EventOpcode.Selection:
                     return new WaylandType[]
                     {
                         WaylandType.Object,
                     };
-                    break;
                 default:
                     throw new ArgumentOutOfRangeException("unknown event");
             }
@@ -1311,6 +1365,7 @@ namespace WaylandNET.Client.Protocol
         public enum Error : int
         {
             Role = 0,
+            UsedSource = 1,
         }
         /// <summary>
         /// start drag-and-drop operation
@@ -1332,7 +1387,7 @@ namespace WaylandNET.Client.Protocol
         /// The icon surface is an optional (can be NULL) surface that
         /// provides an icon to be moved around with the cursor.  Initially,
         /// the top-left corner of the icon surface is placed at the cursor
-        /// hotspot, but subsequent wl_surface.attach request can move the
+        /// hotspot, but subsequent wl_surface.offset requests can move the
         /// relative position. Attach requests must be confirmed with
         /// wl_surface.commit as usual. The icon surface is given the role of
         /// a drag-and-drop icon. If the icon surface already has another role,
@@ -1340,6 +1395,10 @@ namespace WaylandNET.Client.Protocol
         /// 
         /// The input region is ignored for wl_surfaces with the role of a
         /// drag-and-drop icon.
+        /// 
+        /// The given source may not be used in any further set_selection or
+        /// start_drag requests. Attempting to reuse a previously-used source
+        /// may send a used_source error.
         /// </para>
         /// </summary>
         /// <param name="source">data source for the eventual transfer</param>
@@ -1357,6 +1416,10 @@ namespace WaylandNET.Client.Protocol
         /// to the data from the source on behalf of the client.
         /// 
         /// To unset the selection, set the source to NULL.
+        /// 
+        /// The given source may not be used in any further set_selection or
+        /// start_drag requests. Attempting to reuse a previously-used source
+        /// may send a used_source error.
         /// </para>
         /// </summary>
         /// <param name="source">data source for the selection</param>
@@ -1377,7 +1440,7 @@ namespace WaylandNET.Client.Protocol
             Die();
         }
     }
-    /// wl_data_device_manager version 3
+    /// wl_data_device_manager version 4
     /// <summary>
     /// data transfer interface
     /// <para>
@@ -1402,6 +1465,7 @@ namespace WaylandNET.Client.Protocol
         {
             CreateDataSource,
             GetDataDevice,
+            Release,
         }
         public enum EventOpcode : ushort
         {
@@ -1486,6 +1550,18 @@ namespace WaylandNET.Client.Protocol
             Marshal((ushort)RequestOpcode.GetDataDevice, id, seat.Id);
             Connection[id] = new WlDataDevice(id, Version, ClientConnection);
             return (WlDataDevice)Connection[id];
+        }
+        /// <summary>
+        /// destroy wl_data_device_manager
+        /// <para>
+        /// This request destroys the wl_data_device_manager. This has no effect on any other
+        /// objects.
+        /// </para>
+        /// </summary>
+        public void Release()
+        {
+            Marshal((ushort)RequestOpcode.Release);
+            Die();
         }
     }
     /// wl_shell version 1
@@ -1679,7 +1755,6 @@ namespace WaylandNET.Client.Protocol
                     {
                         WaylandType.UInt,
                     };
-                    break;
                 case EventOpcode.Configure:
                     return new WaylandType[]
                     {
@@ -1687,12 +1762,10 @@ namespace WaylandNET.Client.Protocol
                         WaylandType.Int,
                         WaylandType.Int,
                     };
-                    break;
                 case EventOpcode.PopupDone:
                     return new WaylandType[]
                     {
                     };
-                    break;
                 default:
                     throw new ArgumentOutOfRangeException("unknown event");
             }
@@ -1964,7 +2037,7 @@ namespace WaylandNET.Client.Protocol
             Marshal((ushort)RequestOpcode.SetClass, @class);
         }
     }
-    /// wl_surface version 6
+    /// wl_surface version 7
     /// <summary>
     /// an onscreen surface
     /// <para>
@@ -2030,6 +2103,7 @@ namespace WaylandNET.Client.Protocol
             SetBufferScale,
             DamageBuffer,
             Offset,
+            GetRelease,
         }
         public enum EventOpcode : ushort
         {
@@ -2072,10 +2146,15 @@ namespace WaylandNET.Client.Protocol
         /// This event indicates the preferred buffer scale for this surface. It is
         /// sent whenever the compositor's preference changes.
         /// 
+        /// Before receiving this event the preferred buffer scale for this surface
+        /// is 1.
+        /// 
         /// It is intended that scaling aware clients use this event to scale their
         /// content and use wl_surface.set_buffer_scale to indicate the scale they
         /// have rendered with. This allows clients to supply a higher detail
         /// buffer.
+        /// 
+        /// The compositor shall emit a scale value greater than 0.
         /// </para>
         /// </summary>
         /// <param name="factor">preferred scaling factor</param>
@@ -2086,9 +2165,12 @@ namespace WaylandNET.Client.Protocol
         /// This event indicates the preferred buffer transform for this surface.
         /// It is sent whenever the compositor's preference changes.
         /// 
-        /// It is intended that transform aware clients use this event to apply the
-        /// transform to their content and use wl_surface.set_buffer_transform to
-        /// indicate the transform they have rendered with.
+        /// Before receiving this event the preferred buffer transform for this
+        /// surface is normal.
+        /// 
+        /// Applying this transformation to the surface buffer contents and using
+        /// wl_surface.set_buffer_transform might allow the compositor to use the
+        /// surface buffer more efficiently.
         /// </para>
         /// </summary>
         /// <param name="transform">preferred transform</param>
@@ -2138,25 +2220,21 @@ namespace WaylandNET.Client.Protocol
                     {
                         WaylandType.Object,
                     };
-                    break;
                 case EventOpcode.Leave:
                     return new WaylandType[]
                     {
                         WaylandType.Object,
                     };
-                    break;
                 case EventOpcode.PreferredBufferScale:
                     return new WaylandType[]
                     {
                         WaylandType.Int,
                     };
-                    break;
                 case EventOpcode.PreferredBufferTransform:
                     return new WaylandType[]
                     {
                         WaylandType.UInt,
                     };
-                    break;
                 default:
                     throw new ArgumentOutOfRangeException("unknown event");
             }
@@ -2174,6 +2252,7 @@ namespace WaylandNET.Client.Protocol
             InvalidSize = 2,
             InvalidOffset = 3,
             DefunctRoleObject = 4,
+            NoBuffer = 5,
         }
         /// <summary>
         /// delete surface
@@ -2233,8 +2312,11 @@ namespace WaylandNET.Client.Protocol
         /// If a pending wl_buffer has been committed to more than one wl_surface,
         /// the delivery of wl_buffer.release events becomes undefined. A well
         /// behaved client should not rely on wl_buffer.release events in this
-        /// case. Alternatively, a client could create multiple wl_buffer objects
-        /// from the same backing storage or use wp_linux_buffer_release.
+        /// case. Instead, clients hitting this case should use
+        /// wl_surface.get_release or use a protocol extension providing per-commit
+        /// release notifications (if none of these options are available, a
+        /// fallback can be implemented by creating multiple wl_buffer objects from
+        /// the same backing storage).
         /// 
         /// Destroying the wl_buffer after wl_buffer.release does not change
         /// the surface contents. Destroying the wl_buffer before wl_buffer.release
@@ -2246,6 +2328,13 @@ namespace WaylandNET.Client.Protocol
         /// 
         /// If wl_surface.attach is sent with a NULL wl_buffer, the
         /// following wl_surface.commit will remove the surface content.
+        /// 
+        /// If a pending wl_buffer has been destroyed, the result is not specified.
+        /// Many compositors are known to remove the surface content on the following
+        /// wl_surface.commit, but this behaviour is not universal. Clients seeking to
+        /// maximise compatibility should not destroy pending buffers and should
+        /// ensure that they explicitly remove content from surfaces, even after
+        /// destroying buffers.
         /// </para>
         /// </summary>
         /// <param name="buffer">buffer of surface contents</param>
@@ -2405,21 +2494,50 @@ namespace WaylandNET.Client.Protocol
         /// <para>
         /// Surface state (input, opaque, and damage regions, attached buffers,
         /// etc.) is double-buffered. Protocol requests modify the pending state,
-        /// as opposed to the current state in use by the compositor. A commit
-        /// request atomically applies all pending state, replacing the current
-        /// state. After commit, the new pending state is as documented for each
-        /// related request.
-        /// 
-        /// On commit, a pending wl_buffer is applied first, and all other state
-        /// second. This means that all coordinates in double-buffered state are
-        /// relative to the new wl_buffer coming into use, except for
-        /// wl_surface.attach itself. If there is no pending wl_buffer, the
-        /// coordinates are relative to the current surface contents.
+        /// as opposed to the active state in use by the compositor.
         /// 
         /// All requests that need a commit to become effective are documented
         /// to affect double-buffered state.
         /// 
         /// Other interfaces may add further double-buffered surface state.
+        /// 
+        /// A commit request atomically creates a Content Update (CU) from the
+        /// pending state, even if the pending state has not been touched. The
+        /// content update is placed at the end of a per-surface queue until it
+        /// becomes active. After commit, the new pending state is as documented for
+        /// each related request.
+        /// 
+        /// A CU is either a Desync Content Update (DCU) or a Sync Content Update
+        /// (SCU). If the surface is effectively synchronized at the commit request,
+        /// it is a SCU, otherwise a DCU.
+        /// 
+        /// When a surface transitions from effectively synchronized to effectively
+        /// desynchronized, all SCUs in its queue which are not reachable by any
+        /// DCU become DCUs and dependency edges from outside the queue to these CUs
+        /// are removed.
+        /// 
+        /// See wl_subsurface for the definition of 'effectively synchronized' and
+        /// 'effectively desynchronized'.
+        /// 
+        /// When a CU is placed in the queue, the CU has a dependency on the CU in
+        /// front of it and to the SCU at end of the queue of every direct child
+        /// surface if that SCU exists and does not have another dependent. This can
+        /// form a directed acyclic graph of CUs with dependencies as edges.
+        /// 
+        /// In addition to surface state, the CU can have constraints that must be
+        /// satisfied before it can be applied. Other interfaces may add CU
+        /// constraints.
+        /// 
+        /// All DCUs which do not have a SCU in front of themselves in their queue,
+        /// are candidates. If the graph that's reachable by a candidate does not
+        /// have any unsatisfied constraints, the entire graph must be applied
+        /// atomically.
+        /// 
+        /// When a CU is applied, the wl_buffer is applied before all other state.
+        /// This means that all coordinates in double-buffered state are relative to
+        /// the newly attached wl_buffers, except for wl_surface.attach itself. If
+        /// there is no newly attached wl_buffer, the coordinates are relative to
+        /// the previous content update.
         /// </para>
         /// </summary>
         public void Commit()
@@ -2429,10 +2547,12 @@ namespace WaylandNET.Client.Protocol
         /// <summary>
         /// sets the buffer transformation
         /// <para>
-        /// This request sets an optional transformation on how the compositor
-        /// interprets the contents of the buffer attached to the surface. The
-        /// accepted values for the transform parameter are the values for
-        /// wl_output.transform.
+        /// This request sets the transformation that the client has already applied
+        /// to the content of the buffer. The accepted values for the transform
+        /// parameter are the values for wl_output.transform.
+        /// 
+        /// The compositor applies the inverse of this transformation whenever it
+        /// uses the buffer contents.
         /// 
         /// Buffer transform is double-buffered state, see wl_surface.commit.
         /// 
@@ -2489,11 +2609,11 @@ namespace WaylandNET.Client.Protocol
         /// a buffer that is larger (by a factor of scale in each dimension)
         /// than the desired surface size.
         /// 
-        /// If scale is not positive the invalid_scale protocol error is
+        /// If scale is not greater than 0 the invalid_scale protocol error is
         /// raised.
         /// </para>
         /// </summary>
-        /// <param name="scale">positive scale for interpreting buffer contents</param>
+        /// <param name="scale">scale for interpreting buffer contents</param>
         public void SetBufferScale(int scale)
         {
             Marshal((ushort)RequestOpcode.SetBufferScale, scale);
@@ -2552,6 +2672,9 @@ namespace WaylandNET.Client.Protocol
         /// x and y, combined with the new surface size define in which
         /// directions the surface's size changes.
         /// 
+        /// The exact semantics of wl_surface.offset are role-specific. Refer to
+        /// the documentation of specific roles for more information.
+        /// 
         /// Surface location offset is double-buffered state, see
         /// wl_surface.commit.
         /// 
@@ -2566,8 +2689,39 @@ namespace WaylandNET.Client.Protocol
         {
             Marshal((ushort)RequestOpcode.Offset, x, y);
         }
+        /// <summary>
+        /// get a release callback
+        /// <para>
+        /// Create a callback for the release of the buffer attached by the client
+        /// with wl_surface.attach.
+        /// 
+        /// The compositor will release the buffer when it has finished its usage of
+        /// the underlying storage for the relevant commit. Once the client receives
+        /// this event, and assuming the associated buffer is not pending release
+        /// from other wl_surface.commit requests, the client can safely re-use the
+        /// buffer.
+        /// 
+        /// Release callbacks are double-buffered state, and will be associated
+        /// with the pending buffer at wl_surface.commit time.
+        /// 
+        /// The callback_data passed in the wl_callback.done event is unused and
+        /// is always zero.
+        /// 
+        /// Sending this request without attaching a non-null buffer in the same
+        /// content update is a protocol error. The compositor will send the
+        /// no_buffer error in this case.
+        /// </para>
+        /// </summary>
+        /// <returns>callback object for the release</returns>
+        public WlCallback GetRelease()
+        {
+            uint callback = Connection.AllocateId();
+            Marshal((ushort)RequestOpcode.GetRelease, callback);
+            Connection[callback] = new WlCallback(callback, Version, ClientConnection);
+            return (WlCallback)Connection[callback];
+        }
     }
-    /// wl_seat version 9
+    /// wl_seat version 10
     /// <summary>
     /// group of input devices
     /// <para>
@@ -2597,9 +2751,10 @@ namespace WaylandNET.Client.Protocol
         /// <summary>
         /// seat capabilities changed
         /// <para>
-        /// This is emitted whenever a seat gains or loses the pointer,
-        /// keyboard or touch capabilities.  The argument is a capability
-        /// enum containing the complete set of capabilities this seat has.
+        /// This is sent on binding to the seat global or whenever a seat gains
+        /// or loses the pointer, keyboard or touch capabilities.
+        /// The argument is a capability enum containing the complete set of
+        /// capabilities this seat has.
         /// 
         /// When the pointer capability is added, a client may create a
         /// wl_pointer object using the wl_seat.get_pointer request. This object
@@ -2638,9 +2793,9 @@ namespace WaylandNET.Client.Protocol
         /// The same seat names are used for all clients. Thus, the name can be
         /// shared across processes to refer to a specific wl_seat global.
         /// 
-        /// The name event is sent after binding to the seat global. This event is
-        /// only sent once per seat object, and the name does not change over the
-        /// lifetime of the wl_seat global.
+        /// The name event is sent after binding to the seat global, and should be sent
+        /// before announcing capabilities. This event is only sent once per seat object,
+        /// and the name does not change over the lifetime of the wl_seat global.
         /// 
         /// Compositors may re-use the same seat name if the wl_seat global is
         /// destroyed and re-created later.
@@ -2679,13 +2834,11 @@ namespace WaylandNET.Client.Protocol
                     {
                         WaylandType.UInt,
                     };
-                    break;
                 case EventOpcode.Name:
                     return new WaylandType[]
                     {
                         WaylandType.String,
                     };
-                    break;
                 default:
                     throw new ArgumentOutOfRangeException("unknown event");
             }
@@ -2790,7 +2943,7 @@ namespace WaylandNET.Client.Protocol
             Die();
         }
     }
-    /// wl_pointer version 9
+    /// wl_pointer version 10
     /// <summary>
     /// pointer input device
     /// <para>
@@ -3233,14 +3386,12 @@ namespace WaylandNET.Client.Protocol
                         WaylandType.Fixed,
                         WaylandType.Fixed,
                     };
-                    break;
                 case EventOpcode.Leave:
                     return new WaylandType[]
                     {
                         WaylandType.UInt,
                         WaylandType.Object,
                     };
-                    break;
                 case EventOpcode.Motion:
                     return new WaylandType[]
                     {
@@ -3248,7 +3399,6 @@ namespace WaylandNET.Client.Protocol
                         WaylandType.Fixed,
                         WaylandType.Fixed,
                     };
-                    break;
                 case EventOpcode.Button:
                     return new WaylandType[]
                     {
@@ -3257,7 +3407,6 @@ namespace WaylandNET.Client.Protocol
                         WaylandType.UInt,
                         WaylandType.UInt,
                     };
-                    break;
                 case EventOpcode.Axis:
                     return new WaylandType[]
                     {
@@ -3265,46 +3414,39 @@ namespace WaylandNET.Client.Protocol
                         WaylandType.UInt,
                         WaylandType.Fixed,
                     };
-                    break;
                 case EventOpcode.Frame:
                     return new WaylandType[]
                     {
                     };
-                    break;
                 case EventOpcode.AxisSource:
                     return new WaylandType[]
                     {
                         WaylandType.UInt,
                     };
-                    break;
                 case EventOpcode.AxisStop:
                     return new WaylandType[]
                     {
                         WaylandType.UInt,
                         WaylandType.UInt,
                     };
-                    break;
                 case EventOpcode.AxisDiscrete:
                     return new WaylandType[]
                     {
                         WaylandType.UInt,
                         WaylandType.Int,
                     };
-                    break;
                 case EventOpcode.AxisValue120:
                     return new WaylandType[]
                     {
                         WaylandType.UInt,
                         WaylandType.Int,
                     };
-                    break;
                 case EventOpcode.AxisRelativeDirection:
                     return new WaylandType[]
                     {
                         WaylandType.UInt,
                         WaylandType.UInt,
                     };
-                    break;
                 default:
                     throw new ArgumentOutOfRangeException("unknown event");
             }
@@ -3396,9 +3538,9 @@ namespace WaylandNET.Client.Protocol
         /// where (x, y) are the coordinates of the pointer location, in
         /// surface-local coordinates.
         /// 
-        /// On surface.attach requests to the pointer surface, hotspot_x
+        /// On wl_surface.offset requests to the pointer surface, hotspot_x
         /// and hotspot_y are decremented by the x and y parameters
-        /// passed to the request. Attach must be confirmed by
+        /// passed to the request. The offset must be applied by
         /// wl_surface.commit as usual.
         /// 
         /// The hotspot can also be updated by passing the currently set
@@ -3438,12 +3580,22 @@ namespace WaylandNET.Client.Protocol
             Die();
         }
     }
-    /// wl_keyboard version 9
+    /// wl_keyboard version 10
     /// <summary>
     /// keyboard input device
     /// <para>
     /// The wl_keyboard interface represents one or more keyboards
     /// associated with a seat.
+    /// 
+    /// Each wl_keyboard has the following logical state:
+    /// 
+    /// - an active surface (possibly null),
+    /// - the keys currently logically down,
+    /// - the active modifiers,
+    /// - the active group.
+    /// 
+    /// By default, the active surface is null, the keys currently logically down
+    /// are empty, the active modifiers and the active group are 0.
     /// </para>
     /// </summary>
     public sealed class WlKeyboard : WaylandClientObject
@@ -3478,7 +3630,7 @@ namespace WaylandNET.Client.Protocol
         /// <param name="format">keymap format</param>
         /// <param name="fd">keymap file descriptor</param>
         /// <param name="size">keymap size, in bytes</param>
-        public delegate void KeymapHandler(WlKeyboard wlKeyboard, KeymapFormat format, IntPtr fd, uint size);
+        public delegate void KeymapHandler(WlKeyboard wlKeyboard, KeymapFormat format, SafeFileHandle fd, uint size);
         /// <summary>
         /// enter event
         /// <para>
@@ -3487,11 +3639,19 @@ namespace WaylandNET.Client.Protocol
         /// 
         /// The compositor must send the wl_keyboard.modifiers event after this
         /// event.
+        /// 
+        /// In the wl_keyboard logical state, this event sets the active surface to
+        /// the surface argument and the keys currently logically down to the keys
+        /// in the keys argument. The compositor must not send this event if the
+        /// wl_keyboard already had an active surface immediately before this event.
+        /// 
+        /// Clients should not use the list of pressed keys to emulate key-press
+        /// events. The order of keys in the list is unspecified.
         /// </para>
         /// </summary>
         /// <param name="serial">serial number of the enter event</param>
         /// <param name="surface">surface gaining keyboard focus</param>
-        /// <param name="keys">the currently pressed keys</param>
+        /// <param name="keys">the keys currently logically down</param>
         public delegate void EnterHandler(WlKeyboard wlKeyboard, uint serial, WlSurface surface, byte[] keys);
         /// <summary>
         /// leave event
@@ -3502,8 +3662,10 @@ namespace WaylandNET.Client.Protocol
         /// The leave notification is sent before the enter notification
         /// for the new focus.
         /// 
-        /// After this event client must assume that all keys, including modifiers,
-        /// are lifted and also it must stop key repeating if there's some going on.
+        /// In the wl_keyboard logical state, this event resets all values to their
+        /// defaults. The compositor must not send this event if the active surface
+        /// of the wl_keyboard was not equal to the surface argument immediately
+        /// before this event.
         /// </para>
         /// </summary>
         /// <param name="serial">serial number of the leave event</param>
@@ -3521,6 +3683,20 @@ namespace WaylandNET.Client.Protocol
         /// 
         /// If this event produces a change in modifiers, then the resulting
         /// wl_keyboard.modifiers event must be sent after this event.
+        /// 
+        /// In the wl_keyboard logical state, this event adds the key to the keys
+        /// currently logically down (if the state argument is pressed) or removes
+        /// the key from the keys currently logically down (if the state argument is
+        /// released). The compositor must not send this event if the wl_keyboard
+        /// did not have an active surface immediately before this event. The
+        /// compositor must not send this event if state is pressed (resp. released)
+        /// and the key was already logically down (resp. was not logically down)
+        /// immediately before this event.
+        /// 
+        /// Since version 10, compositors may send key events with the "repeated"
+        /// key state when a wl_keyboard.repeat_info event with a rate argument of
+        /// 0 has been received. This allows the compositor to take over the
+        /// responsibility of key repetition.
         /// </para>
         /// </summary>
         /// <param name="serial">serial number of the key event</param>
@@ -3533,6 +3709,17 @@ namespace WaylandNET.Client.Protocol
         /// <para>
         /// Notifies clients that the modifier and/or group state has
         /// changed, and it should update its local state.
+        /// 
+        /// The compositor may send this event without a surface of the client
+        /// having keyboard focus, for example to tie modifier information to
+        /// pointer focus instead. If a modifier event with pressed modifiers is sent
+        /// without a prior enter event, the client can assume the modifier state is
+        /// valid until it receives the next wl_keyboard.modifiers event. In order to
+        /// reset the modifier state again, the compositor can send a
+        /// wl_keyboard.modifiers event with no pressed modifiers.
+        /// 
+        /// In the wl_keyboard logical state, this event updates the modifiers and
+        /// group.
         /// </para>
         /// </summary>
         /// <param name="serial">serial number of the modifiers event</param>
@@ -3574,7 +3761,7 @@ namespace WaylandNET.Client.Protocol
                 case EventOpcode.Keymap:
                     {
                         var format = (KeymapFormat)(uint)arguments[0];
-                        var fd = (IntPtr)arguments[1];
+                        var fd = (SafeFileHandle)arguments[1];
                         var size = (uint)arguments[2];
                         Keymap?.Invoke(this, format, fd, size);
                         break;
@@ -3635,7 +3822,6 @@ namespace WaylandNET.Client.Protocol
                         WaylandType.Handle,
                         WaylandType.UInt,
                     };
-                    break;
                 case EventOpcode.Enter:
                     return new WaylandType[]
                     {
@@ -3643,14 +3829,12 @@ namespace WaylandNET.Client.Protocol
                         WaylandType.Object,
                         WaylandType.Array,
                     };
-                    break;
                 case EventOpcode.Leave:
                     return new WaylandType[]
                     {
                         WaylandType.UInt,
                         WaylandType.Object,
                     };
-                    break;
                 case EventOpcode.Key:
                     return new WaylandType[]
                     {
@@ -3659,7 +3843,6 @@ namespace WaylandNET.Client.Protocol
                         WaylandType.UInt,
                         WaylandType.UInt,
                     };
-                    break;
                 case EventOpcode.Modifiers:
                     return new WaylandType[]
                     {
@@ -3669,14 +3852,12 @@ namespace WaylandNET.Client.Protocol
                         WaylandType.UInt,
                         WaylandType.UInt,
                     };
-                    break;
                 case EventOpcode.RepeatInfo:
                     return new WaylandType[]
                     {
                         WaylandType.Int,
                         WaylandType.Int,
                     };
-                    break;
                 default:
                     throw new ArgumentOutOfRangeException("unknown event");
             }
@@ -3697,12 +3878,21 @@ namespace WaylandNET.Client.Protocol
         /// physical key state
         /// <para>
         /// Describes the physical state of a key that produced the key event.
+        /// 
+        /// Since version 10, the key can be in a "repeated" pseudo-state which
+        /// means the same as "pressed", but is used to signal repetition in the
+        /// key event.
+        /// 
+        /// The key may only enter the repeated state after entering the pressed
+        /// state and before entering the released state. This event may be
+        /// generated multiple times while the key is down.
         /// </para>
         /// </summary>
         public enum KeyState : int
         {
             Released = 0,
             Pressed = 1,
+            Repeated = 2,
         }
         /// <summary>
         /// release the keyboard object
@@ -3713,7 +3903,7 @@ namespace WaylandNET.Client.Protocol
             Die();
         }
     }
-    /// wl_touch version 9
+    /// wl_touch version 10
     /// <summary>
     /// touchscreen input device
     /// <para>
@@ -3808,6 +3998,8 @@ namespace WaylandNET.Client.Protocol
         /// currently active on this client's surface. The client is
         /// responsible for finalizing the touch points, future touch points on
         /// this surface may reuse the touch point ID.
+        /// 
+        /// No frame event is required after the cancel event.
         /// </para>
         /// </summary>
         public delegate void CancelHandler(WlTouch wlTouch);
@@ -3834,7 +4026,7 @@ namespace WaylandNET.Client.Protocol
         /// of the ellipse, while the minor axis length describes the shorter
         /// diameter. Major and minor are orthogonal and both are specified in
         /// surface-local coordinates. The center of the ellipse is always at the
-        /// touchpoint location as reported by wl_touch.down or wl_touch.move.
+        /// touchpoint location as reported by wl_touch.down or wl_touch.motion.
         /// 
         /// This event is only sent by the compositor if the touch device supports
         /// shape reports. The client has to make reasonable assumptions about the
@@ -3958,7 +4150,6 @@ namespace WaylandNET.Client.Protocol
                         WaylandType.Fixed,
                         WaylandType.Fixed,
                     };
-                    break;
                 case EventOpcode.Up:
                     return new WaylandType[]
                     {
@@ -3966,7 +4157,6 @@ namespace WaylandNET.Client.Protocol
                         WaylandType.UInt,
                         WaylandType.Int,
                     };
-                    break;
                 case EventOpcode.Motion:
                     return new WaylandType[]
                     {
@@ -3975,17 +4165,14 @@ namespace WaylandNET.Client.Protocol
                         WaylandType.Fixed,
                         WaylandType.Fixed,
                     };
-                    break;
                 case EventOpcode.Frame:
                     return new WaylandType[]
                     {
                     };
-                    break;
                 case EventOpcode.Cancel:
                     return new WaylandType[]
                     {
                     };
-                    break;
                 case EventOpcode.Shape:
                     return new WaylandType[]
                     {
@@ -3993,14 +4180,12 @@ namespace WaylandNET.Client.Protocol
                         WaylandType.Fixed,
                         WaylandType.Fixed,
                     };
-                    break;
                 case EventOpcode.Orientation:
                     return new WaylandType[]
                     {
                         WaylandType.Int,
                         WaylandType.Fixed,
                     };
-                    break;
                 default:
                     throw new ArgumentOutOfRangeException("unknown event");
             }
@@ -4057,6 +4242,10 @@ namespace WaylandNET.Client.Protocol
         /// The geometry event will be followed by a done event (starting from
         /// version 2).
         /// 
+        /// Clients should use wl_surface.preferred_buffer_transform instead of the
+        /// transform advertised by this event to find the preferred buffer
+        /// transform to use for a surface.
+        /// 
         /// Note: wl_output only advertises partial information about the output
         /// position and identification. Some compositors, for instance those not
         /// implementing a desktop-style output layout or those exposing virtual
@@ -4072,7 +4261,7 @@ namespace WaylandNET.Client.Protocol
         /// <param name="subpixel">subpixel orientation of the output</param>
         /// <param name="make">textual description of the manufacturer</param>
         /// <param name="model">textual description of the model</param>
-        /// <param name="transform">transform that maps framebuffer to output</param>
+        /// <param name="transform">additional transformation applied to buffer contents during presentation</param>
         public delegate void GeometryHandler(WlOutput wlOutput, int x, int y, int physicalWidth, int physicalHeight, Subpixel subpixel, string make, string model, Transform transform);
         /// <summary>
         /// advertise available modes for the output
@@ -4134,8 +4323,9 @@ namespace WaylandNET.Client.Protocol
         /// This event contains scaling geometry information
         /// that is not in the geometry event. It may be sent after
         /// binding the output object or if the output scale changes
-        /// later. If it is not sent, the client should assume a
-        /// scale of 1.
+        /// later. The compositor will emit a non-zero, positive
+        /// value for scale. If it is not sent, the client should
+        /// assume a scale of 1.
         /// 
         /// A scale larger than 1 means that the compositor will
         /// automatically scale surface buffers by this amount
@@ -4143,12 +4333,9 @@ namespace WaylandNET.Client.Protocol
         /// displays where applications rendering at the native
         /// resolution would be too small to be legible.
         /// 
-        /// It is intended that scaling aware clients track the
-        /// current output of a surface, and if it is on a scaled
-        /// output it should use wl_surface.set_buffer_scale with
-        /// the scale of the output. That way the compositor can
-        /// avoid scaling the surface, and the client can supply
-        /// a higher detail image.
+        /// Clients should use wl_surface.preferred_buffer_scale
+        /// instead of this event to find the preferred buffer
+        /// scale to use for a surface.
         /// 
         /// The scale event will be followed by a done event.
         /// </para>
@@ -4286,7 +4473,6 @@ namespace WaylandNET.Client.Protocol
                         WaylandType.String,
                         WaylandType.Int,
                     };
-                    break;
                 case EventOpcode.Mode:
                     return new WaylandType[]
                     {
@@ -4295,30 +4481,25 @@ namespace WaylandNET.Client.Protocol
                         WaylandType.Int,
                         WaylandType.Int,
                     };
-                    break;
                 case EventOpcode.Done:
                     return new WaylandType[]
                     {
                     };
-                    break;
                 case EventOpcode.Scale:
                     return new WaylandType[]
                     {
                         WaylandType.Int,
                     };
-                    break;
                 case EventOpcode.Name:
                     return new WaylandType[]
                     {
                         WaylandType.String,
                     };
-                    break;
                 case EventOpcode.Description:
                     return new WaylandType[]
                     {
                         WaylandType.String,
                     };
-                    break;
                 default:
                     throw new ArgumentOutOfRangeException("unknown event");
             }
@@ -4340,11 +4521,10 @@ namespace WaylandNET.Client.Protocol
             VerticalBgr = 5,
         }
         /// <summary>
-        /// transform from framebuffer to output
+        /// transformation applied to buffer contents
         /// <para>
-        /// This describes the transform that a compositor will apply to a
-        /// surface to compensate for the rotation or mirroring of an
-        /// output device.
+        /// This describes transformations that clients and compositors apply to
+        /// buffer contents.
         /// 
         /// The flipped values correspond to an initial flip around a
         /// vertical axis followed by rotation.
@@ -4392,7 +4572,7 @@ namespace WaylandNET.Client.Protocol
             Die();
         }
     }
-    /// wl_region version 1
+    /// wl_region version 7
     /// <summary>
     /// region interface
     /// <para>
@@ -4595,23 +4775,9 @@ namespace WaylandNET.Client.Protocol
     /// hidden, or if a NULL wl_buffer is applied. These rules apply
     /// recursively through the tree of surfaces.
     /// 
-    /// The behaviour of a wl_surface.commit request on a sub-surface
-    /// depends on the sub-surface's mode. The possible modes are
-    /// synchronized and desynchronized, see methods
-    /// wl_subsurface.set_sync and wl_subsurface.set_desync. Synchronized
-    /// mode caches the wl_surface state to be applied when the parent's
-    /// state gets applied, and desynchronized mode applies the pending
-    /// wl_surface state directly. A sub-surface is initially in the
-    /// synchronized mode.
-    /// 
-    /// Sub-surfaces also have another kind of state, which is managed by
-    /// wl_subsurface requests, as opposed to wl_surface requests. This
-    /// state includes the sub-surface position relative to the parent
-    /// surface (wl_subsurface.set_position), and the stacking order of
-    /// the parent and its sub-surfaces (wl_subsurface.place_above and
-    /// .place_below). This state is applied when the parent surface's
-    /// wl_surface state is applied, regardless of the sub-surface's mode.
-    /// As the exception, set_sync and set_desync are effective immediately.
+    /// A sub-surface can be in one of two modes. The possible modes are
+    /// synchronized and desynchronized, see methods wl_subsurface.set_sync and
+    /// wl_subsurface.set_desync.
     /// 
     /// The main surface can be thought to be always in desynchronized mode,
     /// since it does not have a parent in the sub-surfaces sense.
@@ -4623,6 +4789,15 @@ namespace WaylandNET.Client.Protocol
     /// synchronized mode, and then assume that all its child and grand-child
     /// sub-surfaces are synchronized, too, without explicitly setting them.
     /// 
+    /// If a surface behaves as in synchronized mode, it is effectively
+    /// synchronized, otherwise it is effectively desynchronized.
+    /// 
+    /// A sub-surface is initially in the synchronized mode.
+    /// 
+    /// The wl_subsurface interface has requests which modify double-buffered
+    /// state of the parent surface (wl_subsurface.set_position, .place_above and
+    /// .place_below).
+    /// 
     /// Destroying a sub-surface takes effect immediately. If you need to
     /// synchronize the removal of a sub-surface to the parent surface update,
     /// unmap the sub-surface first by attaching a NULL wl_buffer, update parent,
@@ -4630,6 +4805,11 @@ namespace WaylandNET.Client.Protocol
     /// 
     /// If the parent wl_surface object is destroyed, the sub-surface is
     /// unmapped.
+    /// 
+    /// A sub-surface never has the keyboard focus of any seat.
+    /// 
+    /// The wl_surface.offset request is ignored: clients must use set_position
+    /// instead to move the sub-surface.
     /// </para>
     /// </summary>
     public sealed class WlSubsurface : WaylandClientObject
@@ -4686,22 +4866,18 @@ namespace WaylandNET.Client.Protocol
         /// <summary>
         /// reposition the sub-surface
         /// <para>
-        /// This schedules a sub-surface position change.
+        /// This sets the position of the sub-surface, relative to the parent
+        /// surface.
+        /// 
         /// The sub-surface will be moved so that its origin (top left
         /// corner pixel) will be at the location x, y of the parent surface
         /// coordinate system. The coordinates are not restricted to the parent
         /// surface area. Negative values are allowed.
         /// 
-        /// The scheduled coordinates will take effect whenever the state of the
-        /// parent surface is applied. When this happens depends on whether the
-        /// parent surface is in synchronized mode or not. See
-        /// wl_subsurface.set_sync and wl_subsurface.set_desync for details.
-        /// 
-        /// If more than one set_position request is invoked by the client before
-        /// the commit of the parent surface, the position of a new request always
-        /// replaces the scheduled position from any previous request.
-        /// 
         /// The initial position is 0, 0.
+        /// 
+        /// Position is double-buffered state on the parent surface, see
+        /// wl_subsurface and wl_surface.commit for more information.
         /// </para>
         /// </summary>
         /// <param name="x">x coordinate in the parent surface</param>
@@ -4719,15 +4895,11 @@ namespace WaylandNET.Client.Protocol
         /// parent surface. Using any other surface, including this sub-surface,
         /// will cause a protocol error.
         /// 
-        /// The z-order is double-buffered. Requests are handled in order and
-        /// applied immediately to a pending state. The final pending state is
-        /// copied to the active state the next time the state of the parent
-        /// surface is applied. When this happens depends on whether the parent
-        /// surface is in synchronized mode or not. See wl_subsurface.set_sync and
-        /// wl_subsurface.set_desync for details.
-        /// 
         /// A new sub-surface is initially added as the top-most in the stack
         /// of its siblings and parent.
+        /// 
+        /// Z-order is double-buffered state on the parent surface, see
+        /// wl_subsurface and wl_surface.commit for more information.
         /// </para>
         /// </summary>
         /// <param name="sibling">the reference surface</param>
@@ -4739,6 +4911,7 @@ namespace WaylandNET.Client.Protocol
         /// restack the sub-surface
         /// <para>
         /// The sub-surface is placed just below the reference surface.
+        /// 
         /// See wl_subsurface.place_above.
         /// </para>
         /// </summary>
@@ -4751,18 +4924,9 @@ namespace WaylandNET.Client.Protocol
         /// set sub-surface to synchronized mode
         /// <para>
         /// Change the commit behaviour of the sub-surface to synchronized
-        /// mode, also described as the parent dependent mode.
+        /// mode.
         /// 
-        /// In synchronized mode, wl_surface.commit on a sub-surface will
-        /// accumulate the committed state in a cache, but the state will
-        /// not be applied and hence will not change the compositor output.
-        /// The cached state is applied to the sub-surface immediately after
-        /// the parent surface's state is applied. This ensures atomic
-        /// updates of the parent and all its synchronized sub-surfaces.
-        /// Applying the cached state will invalidate the cache, so further
-        /// parent surface commits do not (re-)apply old state.
-        /// 
-        /// See wl_subsurface for the recursive effect of this mode.
+        /// See wl_subsurface and wl_surface.commit for more information.
         /// </para>
         /// </summary>
         public void SetSync()
@@ -4773,29 +4937,123 @@ namespace WaylandNET.Client.Protocol
         /// set sub-surface to desynchronized mode
         /// <para>
         /// Change the commit behaviour of the sub-surface to desynchronized
-        /// mode, also described as independent or freely running mode.
+        /// mode.
         /// 
-        /// In desynchronized mode, wl_surface.commit on a sub-surface will
-        /// apply the pending state directly, without caching, as happens
-        /// normally with a wl_surface. Calling wl_surface.commit on the
-        /// parent surface has no effect on the sub-surface's wl_surface
-        /// state. This mode allows a sub-surface to be updated on its own.
-        /// 
-        /// If cached state exists when wl_surface.commit is called in
-        /// desynchronized mode, the pending state is added to the cached
-        /// state, and applied as a whole. This invalidates the cache.
-        /// 
-        /// Note: even if a sub-surface is set to desynchronized, a parent
-        /// sub-surface may override it to behave as synchronized. For details,
-        /// see wl_subsurface.
-        /// 
-        /// If a surface's parent surface behaves as desynchronized, then
-        /// the cached state is applied on set_desync.
+        /// See wl_subsurface and wl_surface.commit for more information.
         /// </para>
         /// </summary>
         public void SetDesync()
         {
             Marshal((ushort)RequestOpcode.SetDesync);
+        }
+    }
+    /// wl_fixes version 2
+    /// <summary>
+    /// wayland protocol fixes
+    /// <para>
+    /// This global fixes problems with other core-protocol interfaces that
+    /// cannot be fixed in these interfaces themselves.
+    /// </para>
+    /// </summary>
+    public sealed class WlFixes : WaylandClientObject
+    {
+        public WlFixes(uint id, uint version, WaylandClientConnection connection) : base("wl_fixes", id, version, connection)
+        {
+        }
+        public enum RequestOpcode : ushort
+        {
+            Destroy,
+            DestroyRegistry,
+            AckGlobalRemove,
+        }
+        public enum EventOpcode : ushort
+        {
+        }
+        public override void Handle(ushort opcode, params object[] arguments)
+        {
+            switch ((EventOpcode)opcode)
+            {
+                default:
+                    throw new ArgumentOutOfRangeException("unknown event");
+            }
+        }
+        public override WaylandType[] Arguments(ushort opcode)
+        {
+            switch ((EventOpcode)opcode)
+            {
+                default:
+                    throw new ArgumentOutOfRangeException("unknown event");
+            }
+        }
+        /// <summary>
+        /// wl_fixes error values
+        /// <para>
+        /// These errors can be emitted in response to wl_fixes requests.
+        /// </para>
+        /// </summary>
+        public enum Error : int
+        {
+            InvalidAckRemove = 0,
+        }
+        /// <summary>
+        /// destroys this object
+        /// </summary>
+        public void Destroy()
+        {
+            Marshal((ushort)RequestOpcode.Destroy);
+            Die();
+        }
+        /// <summary>
+        /// destroy a wl_registry
+        /// <para>
+        /// This request destroys a wl_registry object.
+        /// 
+        /// The client should no longer use the wl_registry after making this
+        /// request.
+        /// 
+        /// The compositor will emit a wl_display.delete_id event with the object ID
+        /// of the registry and will no longer emit any events on the registry. The
+        /// client should re-use the object ID once it receives the
+        /// wl_display.delete_id event.
+        /// </para>
+        /// </summary>
+        /// <param name="registry">the registry to destroy</param>
+        public void DestroyRegistry(WlRegistry registry)
+        {
+            Marshal((ushort)RequestOpcode.DestroyRegistry, registry.Id);
+        }
+        /// <summary>
+        /// acknowledge global removal
+        /// <para>
+        /// Acknowledge the removal of the specified global.
+        /// 
+        /// If no global with the specified name exists or the global is not removed,
+        /// the wl_fixes.invalid_ack_remove protocol error will be posted.
+        /// 
+        /// Due to the Wayland protocol being asynchronous, the wl_global objects
+        /// cannot be destroyed immediately. For example, if a wl_global is removed
+        /// and a client attempts to bind that global around same time, it can
+        /// result in a protocol error due to an unknown global name in the bind
+        /// request.
+        /// 
+        /// In order to avoid crashing clients, the compositor should remove the
+        /// wl_global once it is guaranteed that no more bind requests will come.
+        /// 
+        /// The wl_fixes.ack_global_remove() request is used to signal to the
+        /// compositor that the client will not bind the given global anymore. After
+        /// all clients acknowledge the removal of the global, the compositor can
+        /// safely destroy it.
+        /// 
+        /// The client must call the wl_fixes.ack_global_remove() request in
+        /// response to a wl_registry.global_remove() event even if it did not bind
+        /// the corresponding global.
+        /// </para>
+        /// </summary>
+        /// <param name="registry">the registry object</param>
+        /// <param name="name">unique name of the global</param>
+        public void AckGlobalRemove(WlRegistry registry, uint name)
+        {
+            Marshal((ushort)RequestOpcode.AckGlobalRemove, registry.Id, name);
         }
     }
 }

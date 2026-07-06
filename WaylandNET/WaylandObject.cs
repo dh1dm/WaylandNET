@@ -13,7 +13,7 @@ namespace WaylandNET
 
         public void Marshal(ushort opcode, params object[] arguments)
         {
-            Connection.Marshal(Id, opcode, arguments);
+            Connection.SendRequest(Id, opcode, arguments);
         }
 
         protected void Die()
