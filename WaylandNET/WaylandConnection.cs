@@ -25,7 +25,7 @@ namespace WaylandNET
         public uint AllocateId() => objectMap.AllocateId();
         public void DeallocateId(uint id) => objectMap.DeallocateId(id);
 
-        public void SendRequest(uint id, ushort opcode, params object[] arguments)
+        public void SendRequest(uint id, ushort opcode, object[] arguments)
         {
             ushort size = 8;
             foreach (object argument in arguments)

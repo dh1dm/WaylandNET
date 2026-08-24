@@ -8,7 +8,7 @@ namespace WaylandNET
         public bool IsAlive { get; protected set; }
         public WaylandConnection Connection { get; private set; }
 
-        public abstract void Handle(ushort opcode, params object[] arguments);
+        public abstract void Handle(ushort opcode, object[] arguments);
         public abstract WaylandType[] Arguments(ushort opcode);
 
         public void Marshal(ushort opcode, params object[] arguments)

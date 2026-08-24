@@ -9,8 +9,5 @@ namespace WaylandNET.Client
         {
             ClientConnection = connection;
         }
-
-        public abstract override void Handle(ushort opcode, object[] arguments);
-        public abstract override WaylandType[] Arguments(ushort opcode);
     }
 }

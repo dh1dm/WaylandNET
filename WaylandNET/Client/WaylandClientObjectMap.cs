@@ -5,12 +5,7 @@ namespace WaylandNET.Client
 {
     public class WaylandClientObjectMap : WaylandObjectMap
     {
-        List<int> free;
-
-        public WaylandClientObjectMap()
-        {
-            free = new List<int>();
-        }
+        private readonly List<int> free = new List<int>();
 
         public override uint AllocateId()
         {

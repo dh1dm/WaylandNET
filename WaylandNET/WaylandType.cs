@@ -1,6 +1,6 @@
 namespace WaylandNET
 {
-    public enum WaylandType
+    public enum WaylandType : byte
     {
         Int,
         UInt,
