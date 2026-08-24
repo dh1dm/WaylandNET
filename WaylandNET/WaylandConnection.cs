@@ -91,8 +91,8 @@ namespace WaylandNET
                 pfd.events = sendQueue.Flush(sockfd) ? PollEvents.POLLIN :
                     PollEvents.POLLIN | PollEvents.POLLOUT;
                 pfd.revents = 0;
-                bool ignored = false;
-                sockfd.DangerousAddRef(ref ignored); // throws if disposed
+                bool success = false;
+                sockfd.DangerousAddRef(ref success); // throws if disposed
                 pfd.fd = (int)sockfd.DangerousGetHandle();
                 try
                 {

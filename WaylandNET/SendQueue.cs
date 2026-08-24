@@ -175,8 +175,8 @@ namespace WaylandNET
                 {
                     foreach (SafeHandle fd in fds)
                     {
-                        bool ignored = false;
-                        fd.DangerousAddRef(ref ignored); // throws if disposed
+                        bool success = false;
+                        fd.DangerousAddRef(ref success); // throws if disposed
                         cmsg_fds[fds_taken++] = (int)fd.DangerousGetHandle();
                     }
                     result = SysNative.SendMsg(sockfd, ref msg);
